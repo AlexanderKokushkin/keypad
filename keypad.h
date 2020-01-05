@@ -8,7 +8,7 @@
 
 namespace warduino {
     
-enum class key_t : uint8_t{stop=0,none=1,dopler=2,up=3,down=4,left=5,right=6,shock=7,unknown=8,};
+enum class key_t : uint8_t{stop=0,none=1,up=2,down=3,left=4,right=5,shock=6,unknown=7,};
 
 class dummyRfid{
    public:
@@ -47,19 +47,20 @@ class Keypad_T{
   inline static bool powered = true; // not necessary
   inline static bool enabled = true; // shock sensor is always on 
   
-  static const uint16_t SCANINTERVAL   = 100; // ms
-  static const uint16_t SPELLINTERVAL  = 1000; // max ms between keys in spell
+  static const uint16_t SCAN_INTERVAL_MS   = 100; // ms
+  static const uint16_t SPELL_SINGLE_KEY_WINDOW_MS  = 1000; // max ms between keys in spell
  
   inline static uint32_t actionTimestamp = millis();
   inline static uint32_t scanTimestamp = 0;
 
-  inline static key_t lastKeypressed = key_t::none;
+  inline static key_t lastNotNecessarilySignificantKeypressed = key_t::none;
   inline static key_t history[historySize] = {key_t::none};
   inline static SpellBookItem spellBook[spellBookSize] = {0};
   static void pushIntoHistory( key_t newKey );
   static bool isSpellMatched(const key_t* sample );
   
   inline static onKeyChanged_t onKeyChangedPtr = nullptr; 
+  static void checkForSpell();
 };               
 
 template<class T,class R> void Keypad_T<T,R>::init(){
@@ -87,12 +88,16 @@ template<class T,class R> void Keypad_T<T,R>::powerOff(){
 }
 
 
-template<class T,class R> bool Keypad_T<T,R>::isSpellMatched(const key_t* sample ){
-  // shiftedLeft
+template<class T,class R> bool Keypad_T<T,R>::isSpellMatched(const key_t* spellSequence ){
+  
+  // This code is ugly
+  // history is shiftedLeft ticker
+  // spellSequence should be smaller than history, ended with key_t::stop
+  
+  // 1. detecting spellSequence useful length
   uint8_t lastMeaningful = historySize-1; 
-  // spell could not be larger than history, terminating symbol is always "stop"
   for (uint8_t i = 0; i < historySize-1; i++ ){
-    key_t x = static_cast<key_t>( pgm_read_byte_near( &sample[i] ) ); 
+    key_t x = static_cast<key_t>( pgm_read_byte_near( &spellSequence[i] ) ); 
     if (x == key_t::stop) {
         if (i==0) return false; // empty spell 
         lastMeaningful = i-1;  
@@ -100,97 +105,89 @@ template<class T,class R> bool Keypad_T<T,R>::isSpellMatched(const key_t* sample
      }
   }
   
+  // 2. comparing history and spellSequence starting from the end
   for (int8_t i = lastMeaningful; i >=0 ; i-- ){  // i should be signed
-    key_t x = static_cast<key_t>( pgm_read_byte_near( &sample[i] ) ); 
+    key_t x = static_cast<key_t>( pgm_read_byte_near( &spellSequence[i] ) ); 
     if (history[historySize-(lastMeaningful-i)-1] != x) return false;   
   } 
   return true;
+  
 }
 
 template<class T,class R> void Keypad_T<T,R>::poll(){
-    
- key_t justKeypressed = key_t::none;   
- uint32_t savedMillis = millis(); // careful: it's perishable!
- 
- if ((savedMillis-actionTimestamp)>SPELLINTERVAL){
+
+ if (!enabled){return;};
+ if (millis()-scanTimestamp<SCAN_INTERVAL_MS){return;};
+
+ if (millis()-actionTimestamp>SPELL_SINGLE_KEY_WINDOW_MS){
    pushIntoHistory(key_t::none); // spoil the spell
  }
+	 
+ scanTimestamp=millis();
 
- if ((savedMillis-scanTimestamp >= SCANINTERVAL)and(enabled)){
-  scanTimestamp=savedMillis;
-  
-  uint16_t analogValue=analogRead( T::ttp_signal );
-  switch ( analogValue ){
-     case T::bttnNoneLo ... T::bttnNoneHi:     justKeypressed = key_t::none;   break;
-     case T::bttnDoplerLo ... T::bttnDoplerHi: 
-      justKeypressed = T::doplerConnected() ? key_t::dopler : key_t::none; 
-      break;
-     case T::bttnDownLo ... T::bttnDownHi:     justKeypressed = key_t::down;   break;
-     case T::bttnUpLo ... T::bttnUpHi:         justKeypressed = key_t::up;     break;
-     case T::bttnLeftLo ... T::bttnLeftHi:     justKeypressed = key_t::left;   break;
-     case T::bttnRightLo ... T::bttnRightHi:   justKeypressed = key_t::right;  break;
-     case T::bttnShockLo ... T::bttnShockHi:   justKeypressed = key_t::shock;  break;      
+ key_t justKeypressed = key_t::none;   
+ uint16_t analogValue=analogRead( T::ttp_signal );  
+ switch (analogValue){
+     case T::bttnNoneLo   ... T::bttnNoneHi:   justKeypressed = key_t::none;  break;
+     case T::bttnDownLo   ... T::bttnDownHi:   justKeypressed = key_t::down;  break;
+     case T::bttnUpLo     ... T::bttnUpHi:     justKeypressed = key_t::up;    break;
+     case T::bttnLeftLo   ... T::bttnLeftHi:   justKeypressed = key_t::left;  break;
+     case T::bttnRightLo  ... T::bttnRightHi:  justKeypressed = key_t::right; break;
+     case T::bttnShockLo  ... T::bttnShockHi:  justKeypressed = key_t::shock;  break; 
      default: justKeypressed = key_t::unknown;
-  } // switch 
+ }
   
-  if (justKeypressed != lastKeypressed) {
-   lastKeypressed = justKeypressed; // m/b we can use history for it?
-   actionTimestamp = savedMillis;
-   if (justKeypressed != key_t::none) { // TODO : m/b we should check it first??? p.s. with unknown
-    
-    // we have to keep "dopler" out of history to let spells work
-    if ((justKeypressed != key_t::dopler)&&(justKeypressed != key_t::unknown)) { 
-     pushIntoHistory(justKeypressed);
-    }
-    
-  if (onKeyChangedPtr!=nullptr){onKeyChangedPtr( justKeypressed , analogValue );} 
-    
-    for (uint8_t i=0; i<spellBookSize; i++) {
-     if (spellBook[i].SpellPtr != nullptr) {
-       if ( isSpellMatched(spellBook[i].SpellPtr) ) {   
-         if ( spellBook[i].SpellHandlerPtr != nullptr ) {
-             spellBook[i].SpellHandlerPtr();
-             for (uint8_t j=0; j<historySize; j++) history[j] = key_t::none; // clear history 
-         }
-         break;
-       }
-     }  
-    }
+ if (justKeypressed==lastNotNecessarilySignificantKeypressed){return;};
+ lastNotNecessarilySignificantKeypressed = justKeypressed;	 
 
-   } // justKeypressed != none
-  } // justKeypressed != lastKeypressed 
- } // condition of time and "enabled"
+ actionTimestamp = millis();
  
-
+ if (justKeypressed==key_t::none){return;};
+ if (justKeypressed==key_t::unknown){return;};
+    
+ pushIntoHistory(justKeypressed); 
+    
+ if (onKeyChangedPtr!=nullptr){onKeyChangedPtr( justKeypressed , analogValue );} 
+    
+ checkForSpell();	
 }
 
 template<class T,class R> void Keypad_T<T,R>::addSpell(const key_t* SpellPtr, onSpellCasted_t SpellHandlerPtr ){
-    for (uint8_t i=0; i<spellBookSize; i++) {
-      if ( spellBook[i].SpellPtr == 0) {
-       spellBook[i].SpellPtr = SpellPtr;  
-       spellBook[i].SpellHandlerPtr = SpellHandlerPtr;
-       break;       
-      }  
-    }
+ for(auto& item:spellBook){
+  if (item.SpellPtr==0) {
+   item.SpellPtr = SpellPtr;  
+   item.SpellHandlerPtr = SpellHandlerPtr;
+   break;       
+  }  
+ }
 }
 
-template<class T,class R> bool Keypad_T<T,R>::removeSpell( const onSpellCasted_t HandlerToRemove ){
-  for (uint8_t i=0; i<spellBookSize; i++) {
-    if ( spellBook[i].SpellHandlerPtr == HandlerToRemove ) {
-       spellBook[i].SpellPtr = 0;  
-       spellBook[i].SpellHandlerPtr = 0;
-       return true;       
+template<class T,class R> bool Keypad_T<T,R>::removeSpell(const onSpellCasted_t HandlerToRemove ){
+  for(auto& item:spellBook){
+   if (item.SpellHandlerPtr==HandlerToRemove){
+     item.SpellPtr = 0;  
+     item.SpellHandlerPtr = 0;
+     return true;       
     }  
   }
   return false;
 }
 
+template<class T,class R> void Keypad_T<T,R>::checkForSpell(){
+ for(const auto& item:spellBook){
+  if (item.SpellPtr==nullptr){continue;}
+  if (!isSpellMatched(item.SpellPtr)){continue;}
+	  
+  if (item.SpellHandlerPtr!=nullptr ){item.SpellHandlerPtr();}
+	  
+  for(auto& v: history){v=key_t::none;}
+  break;
+ }	
+}
+
 template<class T,class R> void Keypad_T<T,R>::pushIntoHistory( key_t newKey ){
-  // shiftLeft
-  for (uint8_t i = 0; i < historySize-1; i++ ) {
-   history[i] = history[i+1];
-  }
-  history[historySize-1] = newKey;  
+  for(uint8_t i = 0;i<historySize-1;i++){history[i]=history[i+1];}
+  history[historySize-1] = newKey; // shiftLeft
 }
 
 
