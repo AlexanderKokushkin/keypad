@@ -1,6 +1,9 @@
 #ifndef WARDUINO_KEYPAD_h
 #define WARDUINO_KEYPAD_h
+
+#include <tiny_adxl345.h>
 #include <Arduino.h>
+
 
 // keypad and rfid shares the same power pin
 // rfid should be reinitialized after every keypad power up
@@ -15,7 +18,6 @@ class dummyRfid{
     static void init(){};
     static void onPoweredOff(){};
 }; 
-
   
 template<class T,class R>
 class Keypad_T{
@@ -43,15 +45,21 @@ class Keypad_T{
   static void setOnKeyChanged(onKeyChanged_t v){onKeyChangedPtr=v;};
   static void addSpell(const key_t* SpellPtr, onSpellCasted_t SpellHandlerPtr );
   static bool removeSpell( const onSpellCasted_t HandlerToRemove);
- private:
-  inline static bool powered = true; // not necessary
-  inline static bool enabled = true; // shock sensor is always on 
   
-  static const uint16_t SCAN_INTERVAL_MS   = 100; // ms
-  static const uint16_t SPELL_SINGLE_KEY_WINDOW_MS  = 1000; // max ms between keys in spell
+  static bool getAccelDoubleCheck(){return accelDoubleCheck;};
+  static void setAccelDoubleCheck(bool v){accelDoubleCheck=v;};
+ private:
+  inline static bool powered          = true; // not necessary
+  inline static bool enabled          = true; // shock sensor is always on 
+  inline static bool accelDoubleCheck = true;
+  
+  static const uint16_t SCAN_INTERVAL_MS = 100; // ms
+  static const uint16_t SPELL_SINGLE_KEY_WINDOW_MS = 1000; // max ms between keys in spell
+  static const int16_t KEY_AND_TAP_INTERVAL_MS = 10;
  
   inline static uint32_t actionTimestamp = millis();
   inline static uint32_t scanTimestamp = 0;
+  inline static uint32_t tapTimestamp = 0;
 
   inline static key_t lastNotNecessarilySignificantKeypressed = key_t::none;
   inline static key_t history[historySize] = {key_t::none};
@@ -71,13 +79,20 @@ template<class T,class R> void Keypad_T<T,R>::init(){
 	// for unknown reason there could be "80" from
 	// the very beginning
 	analogRead(T::ttp_signal); // dirty hack
+	
+    Adxl345::init();
+    Adxl345::setRangeSettings(2);
+    Adxl345::setTapDetectionOnXYZ(false,false,true);
+    Adxl345::setTapThreshold(2);
+    Adxl345::setTapDuration(15);
+    Adxl345::setINT_ENABLE(false,true,false,false,false,false,false,false);	
 }
 
 template<class T,class R> void Keypad_T<T,R>::powerOn(){
   digitalWrite(T::ttp_pwr, LOW); // inverted
   if (!isPowered()){ R::init(); }
   powered = true;
-  actionTimestamp = millis();
+  actionTimestamp = millis(); // necessary ?
 }
 
 template<class T,class R> void Keypad_T<T,R>::powerOff(){
@@ -86,7 +101,6 @@ template<class T,class R> void Keypad_T<T,R>::powerOff(){
   digitalWrite(T::ttp_pwr, HIGH); // inverted
   R::onPoweredOff();
 }
-
 
 template<class T,class R> bool Keypad_T<T,R>::isSpellMatched(const key_t* spellSequence ){
   
@@ -118,32 +132,41 @@ template<class T,class R> void Keypad_T<T,R>::poll(){
 
  if (!enabled){return;};
  if (millis()-scanTimestamp<SCAN_INTERVAL_MS){return;};
-
+ scanTimestamp=millis();
+ 
  if (millis()-actionTimestamp>SPELL_SINGLE_KEY_WINDOW_MS){
    pushIntoHistory(key_t::none); // spoil the spell
  }
-	 
- scanTimestamp=millis();
+ 
+ if(Adxl345::getINT_SOURCE() & (1<<Adxl345::BIT_SINGLE_TAP)){
+   tapTimestamp = millis();	
+ } 
 
  key_t justKeypressed = key_t::none;   
  uint16_t analogValue=analogRead( T::ttp_signal );  
  switch (analogValue){
-     case T::bttnNoneLo   ... T::bttnNoneHi:   justKeypressed = key_t::none;  break;
-     case T::bttnDownLo   ... T::bttnDownHi:   justKeypressed = key_t::down;  break;
-     case T::bttnUpLo     ... T::bttnUpHi:     justKeypressed = key_t::up;    break;
-     case T::bttnLeftLo   ... T::bttnLeftHi:   justKeypressed = key_t::left;  break;
-     case T::bttnRightLo  ... T::bttnRightHi:  justKeypressed = key_t::right; break;
-     case T::bttnShockLo  ... T::bttnShockHi:  justKeypressed = key_t::shock;  break; 
-     default: justKeypressed = key_t::unknown;
+  case T::bttnNoneLo  ... T::bttnNoneHi:  justKeypressed = key_t::none;  break;
+  case T::bttnDownLo  ... T::bttnDownHi:  justKeypressed = key_t::down;  break;
+  case T::bttnUpLo    ... T::bttnUpHi:    justKeypressed = key_t::up;    break;
+  case T::bttnLeftLo  ... T::bttnLeftHi:  justKeypressed = key_t::left;  break;
+  case T::bttnRightLo ... T::bttnRightHi: justKeypressed = key_t::right; break;
+  case T::bttnShockLo ... T::bttnShockHi: justKeypressed = key_t::shock; break; 
+  default: justKeypressed = key_t::unknown;
  }
-  
+ 
  if (justKeypressed==lastNotNecessarilySignificantKeypressed){return;};
  lastNotNecessarilySignificantKeypressed = justKeypressed;	 
 
  actionTimestamp = millis();
  
- if (justKeypressed==key_t::none){return;};
- if (justKeypressed==key_t::unknown){return;};
+ if (accelDoubleCheck){
+  int16_t gap = tapTimestamp - actionTimestamp;
+  gap = gap>0?gap:-gap;
+  if (gap > KEY_AND_TAP_INTERVAL_MS){return;}
+ }
+ 
+ if (justKeypressed==key_t::none){return;}
+ if (justKeypressed==key_t::unknown){return;}
     
  pushIntoHistory(justKeypressed); 
     
