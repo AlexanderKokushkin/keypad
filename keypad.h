@@ -34,7 +34,7 @@ class Keypad_T{
       onSpellCasted_t SpellHandlerPtr;
   } SpellBookItem;
 
-  static void init();
+  static bool init();
   static void powerOn();
   static void powerOff();
   static bool isPowered(){return powered;};
@@ -48,6 +48,7 @@ class Keypad_T{
   
   static bool getAccelDoubleCheck(){return accelDoubleCheck;};
   static void setAccelDoubleCheck(bool v){accelDoubleCheck=v;};
+  static inline uint16_t analogValue{0}; // debug
  private:
   inline static bool powered          = true; // not necessary
   inline static bool enabled          = true; // shock sensor is always on 
@@ -60,7 +61,7 @@ class Keypad_T{
   inline static uint32_t actionTimestamp = millis();
   inline static uint32_t scanTimestamp = 0;
   inline static uint32_t tapTimestamp = 0;
-
+  
   inline static key_t lastNotNecessarilySignificantKeypressed = key_t::none;
   inline static key_t history[historySize] = {key_t::none};
   inline static SpellBookItem spellBook[spellBookSize] = {0};
@@ -71,7 +72,7 @@ class Keypad_T{
   static void checkForSpell();
 };               
 
-template<class T,class R> void Keypad_T<T,R>::init(){
+template<class T,class R> bool Keypad_T<T,R>::init(){
 	analogReference(INTERNAL); // 1.1v
 	pinMode(T::ttp_signal, INPUT);
 	pinMode(T::ttp_pwr, OUTPUT);
@@ -80,12 +81,13 @@ template<class T,class R> void Keypad_T<T,R>::init(){
 	// the very beginning
 	analogRead(T::ttp_signal); // dirty hack
 	
-    Adxl345::init();
+    if (!Adxl345::init()){ return false;}
     Adxl345::setRangeSettings(2);
     Adxl345::setTapDetectionOnXYZ(false,false,true);
     Adxl345::setTapThreshold(2);
     Adxl345::setTapDuration(15);
     Adxl345::setINT_ENABLE(false,true,false,false,false,false,false,false);	
+	return(true);
 }
 
 template<class T,class R> void Keypad_T<T,R>::powerOn(){
@@ -141,9 +143,12 @@ template<class T,class R> void Keypad_T<T,R>::poll(){
  if(Adxl345::getINT_SOURCE() & (1<<Adxl345::BIT_SINGLE_TAP)){
    tapTimestamp = millis();	
  } 
+ 
+ //if (digitalRead(3)){return;} // it was debug
 
  key_t justKeypressed = key_t::none;   
- uint16_t analogValue=analogRead( T::ttp_signal );  
+ //uint16_t analogValue=analogRead( T::ttp_signal );  
+ analogValue=analogRead( T::ttp_signal );  
  switch (analogValue){
   case T::bttnNoneLo  ... T::bttnNoneHi:  justKeypressed = key_t::none;  break;
   case T::bttnDownLo  ... T::bttnDownHi:  justKeypressed = key_t::down;  break;
