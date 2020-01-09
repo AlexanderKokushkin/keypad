@@ -140,9 +140,11 @@ template<class T,class R> void Keypad_T<T,R>::poll(){
    pushIntoHistory(key_t::none); // spoil the spell
  }
  
- if(Adxl345::getINT_SOURCE() & (1<<Adxl345::BIT_SINGLE_TAP)){
-   tapTimestamp = millis();	
- } 
+ if (accelDoubleCheck){
+  if(Adxl345::getINT_SOURCE() & (1<<Adxl345::BIT_SINGLE_TAP)){
+    tapTimestamp = millis();	
+  } 
+ }
  
  //if (digitalRead(3)){return;} // it was debug
 
