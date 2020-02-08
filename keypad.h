@@ -11,18 +11,11 @@
 namespace warduino {
     
 enum class key_t : uint8_t{stop=0,none=1,up=2,down=3,left=4,right=5,shock=6,unknown=7,};
-
-class dummyRfid{
-   public:
-    static void init(){};
-    static void onPoweredOff(){};
-}; 
   
-template<class T,class R>
+template<class T,class D>
 class Keypad_T{
  public:   
   typedef void(*onSpellCasted_t)(); 
-  typedef void(*onKeyChanged_t)( key_t key ,int value );
 
   static const int historySize = 20; 
   static const int spellBookSize = 10;
@@ -41,7 +34,6 @@ class Keypad_T{
   static void enable(){enabled = true;}; 
   static void poll();
 
-  static void setOnKeyChanged(onKeyChanged_t v){onKeyChangedPtr=v;};
   static void addSpell(const key_t* SpellPtr, onSpellCasted_t SpellHandlerPtr );
   static bool removeSpell( const onSpellCasted_t HandlerToRemove);
   
@@ -66,11 +58,10 @@ class Keypad_T{
   static void pushIntoHistory( key_t newKey );
   static bool isSpellMatched(const key_t* sample );
   
-  inline static onKeyChanged_t onKeyChangedPtr = nullptr; 
   static void checkForSpell();
 };               
 
-template<class T,class R> bool Keypad_T<T,R>::init(){
+template<class T,class D> bool Keypad_T<T,D>::init(){
 	analogReference(INTERNAL); // 1.1v
 	pinMode(T::ttp_signal, INPUT);
 	pinMode(T::ttp_pwr, OUTPUT);
@@ -89,21 +80,21 @@ template<class T,class R> bool Keypad_T<T,R>::init(){
 	return(true);
 }
 
-template<class T,class R> void Keypad_T<T,R>::powerOn(){
+template<class T,class D> void Keypad_T<T,D>::powerOn(){
   digitalWrite(T::ttp_pwr, LOW); // inverted
-  if (!isPowered()){ R::init(); }
+  //if (!isPowered()){ R::init(); } // TODO RFID related
   powered = true;
   actionTimestamp = millis(); // necessary ?
 }
 
-template<class T,class R> void Keypad_T<T,R>::powerOff(){
+template<class T,class D> void Keypad_T<T,D>::powerOff(){
   if (!isPowered()){return;} // is it necessary?
   powered = false;
   digitalWrite(T::ttp_pwr, HIGH); // inverted
-  R::onPoweredOff();
+  //R::onPoweredOff(); // TODO RFID related
 }
 
-template<class T,class R> bool Keypad_T<T,R>::isSpellMatched(const key_t* spellSequence ){
+template<class T,class D> bool Keypad_T<T,D>::isSpellMatched(const key_t* spellSequence ){
   
   // This code is ugly
   // history is shiftedLeft ticker
@@ -129,7 +120,7 @@ template<class T,class R> bool Keypad_T<T,R>::isSpellMatched(const key_t* spellS
   
 }
 
-template<class T,class R> void Keypad_T<T,R>::poll(){
+template<class T,class D> void Keypad_T<T,D>::poll(){
 
  if (!enabled){return;};
  if (millis()-scanTimestamp<SCAN_INTERVAL_MS){return;};
@@ -172,13 +163,12 @@ template<class T,class R> void Keypad_T<T,R>::poll(){
  if (justKeypressed==key_t::unknown){return;}
     
  pushIntoHistory(justKeypressed); 
-    
- if (onKeyChangedPtr!=nullptr){onKeyChangedPtr( justKeypressed , analogValue );} 
+ D::process_input(justKeypressed,analogValue);
     
  checkForSpell();	
 }
 
-template<class T,class R> void Keypad_T<T,R>::addSpell(const key_t* SpellPtr, onSpellCasted_t SpellHandlerPtr ){
+template<class T,class D> void Keypad_T<T,D>::addSpell(const key_t* SpellPtr, onSpellCasted_t SpellHandlerPtr ){
  for(auto& item:spellBook){
   if (item.SpellPtr==0) {
    item.SpellPtr = SpellPtr;  
@@ -188,7 +178,7 @@ template<class T,class R> void Keypad_T<T,R>::addSpell(const key_t* SpellPtr, on
  }
 }
 
-template<class T,class R> bool Keypad_T<T,R>::removeSpell(const onSpellCasted_t HandlerToRemove ){
+template<class T,class D> bool Keypad_T<T,D>::removeSpell(const onSpellCasted_t HandlerToRemove ){
   for(auto& item:spellBook){
    if (item.SpellHandlerPtr==HandlerToRemove){
      item.SpellPtr = 0;  
@@ -199,7 +189,7 @@ template<class T,class R> bool Keypad_T<T,R>::removeSpell(const onSpellCasted_t 
   return false;
 }
 
-template<class T,class R> void Keypad_T<T,R>::checkForSpell(){
+template<class T,class D> void Keypad_T<T,D>::checkForSpell(){
  for(const auto& item:spellBook){
   if (item.SpellPtr==nullptr){continue;}
   if (!isSpellMatched(item.SpellPtr)){continue;}
@@ -211,7 +201,7 @@ template<class T,class R> void Keypad_T<T,R>::checkForSpell(){
  }	
 }
 
-template<class T,class R> void Keypad_T<T,R>::pushIntoHistory( key_t newKey ){
+template<class T,class D> void Keypad_T<T,D>::pushIntoHistory( key_t newKey ){
   for(uint8_t i = 0;i<historySize-1;i++){history[i]=history[i+1];}
   history[historySize-1] = newKey; // shiftLeft
 }
