@@ -4,7 +4,6 @@
 #include <tiny_adxl345.h>
 #include <Arduino.h>
 
-
 // keypad and rfid shares the same power pin
 // rfid should be reinitialized after every keypad power up
 // we should disable keypad while transmitting (m/b not)
@@ -48,11 +47,10 @@ class Keypad_T{
   
   static bool getAccelDoubleCheck(){return accelDoubleCheck;};
   static void setAccelDoubleCheck(bool v){accelDoubleCheck=v;};
-  static inline uint16_t analogValue{0}; // debug
  private:
   inline static bool powered          = true; // not necessary
   inline static bool enabled          = true; // shock sensor is always on 
-  inline static bool accelDoubleCheck = true;
+  inline static bool accelDoubleCheck = true; // TODO - store it in EEPROM
   
   static const uint16_t SCAN_INTERVAL_MS = 100; // ms
   static const uint16_t SPELL_SINGLE_KEY_WINDOW_MS = 1000; // max ms between keys in spell
@@ -81,10 +79,11 @@ template<class T,class R> bool Keypad_T<T,R>::init(){
 	// the very beginning
 	analogRead(T::ttp_signal); // dirty hack
 	
-    if (!Adxl345::init()){ return false;}
+	// TODO organize constants properly
+    if (!Adxl345::init()){setAccelDoubleCheck(false); return false;}
     Adxl345::setRangeSettings(2);
     Adxl345::setTapDetectionOnXYZ(false,false,true);
-    Adxl345::setTapThreshold(2);
+    Adxl345::setTapThreshold(7); // 2
     Adxl345::setTapDuration(15);
     Adxl345::setINT_ENABLE(false,true,false,false,false,false,false,false);	
 	return(true);
@@ -146,11 +145,8 @@ template<class T,class R> void Keypad_T<T,R>::poll(){
   } 
  }
  
- //if (digitalRead(3)){return;} // it was debug
-
  key_t justKeypressed = key_t::none;   
- //uint16_t analogValue=analogRead( T::ttp_signal );  
- analogValue=analogRead( T::ttp_signal );  
+ uint16_t analogValue=analogRead( T::ttp_signal );  
  switch (analogValue){
   case T::bttnNoneLo  ... T::bttnNoneHi:  justKeypressed = key_t::none;  break;
   case T::bttnDownLo  ... T::bttnDownHi:  justKeypressed = key_t::down;  break;
@@ -219,7 +215,6 @@ template<class T,class R> void Keypad_T<T,R>::pushIntoHistory( key_t newKey ){
   for(uint8_t i = 0;i<historySize-1;i++){history[i]=history[i+1];}
   history[historySize-1] = newKey; // shiftLeft
 }
-
 
 } // namespace
 #endif // WARDUINO_KEYPAD_h
