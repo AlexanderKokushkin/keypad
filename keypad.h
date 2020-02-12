@@ -10,8 +10,9 @@
 
 namespace warduino {
     
-enum class key_t : uint8_t{stop=0,none=1,up=2,down=3,left=4,right=5,shock=6,unknown=7,};
-  
+enum class key_t : uint8_t
+ {stop=0,none=1,up=2,down=3,left=4,right=5,shock=6,unknown=7,rfid=8,turbulence=9};
+ // "turbulance" means gyroscope is in unstable position and generates fake taps.   
 template<class T,class D>
 class Keypad_T{
  public:   
@@ -51,6 +52,8 @@ class Keypad_T{
   inline static uint32_t actionTimestamp = millis();
   inline static uint32_t scanTimestamp = 0;
   inline static uint32_t tapTimestamp = 0;
+  inline static uint8_t turbulenceCounter = 0; // Taps w/o Clicks means Gyro is in unstable position
+  static const uint8_t MAX_TURBULENCE_COUNTER = 20;
   
   inline static key_t lastNotNecessarilySignificantKeypressed = key_t::none;
   inline static key_t history[historySize] = {key_t::none};
@@ -132,7 +135,13 @@ template<class T,class D> void Keypad_T<T,D>::poll(){
  
  if (accelDoubleCheck){
   if(Adxl345::getINT_SOURCE() & (1<<Adxl345::BIT_SINGLE_TAP)){
-    tapTimestamp = millis();	
+    tapTimestamp = millis();
+    turbulenceCounter++;
+    if (turbulenceCounter > MAX_TURBULENCE_COUNTER){ 
+      D::process_input(key_t::turbulence,0);
+      turbulenceCounter = 0;
+      return;
+    };	
   } 
  }
  
@@ -164,6 +173,7 @@ template<class T,class D> void Keypad_T<T,D>::poll(){
     
  pushIntoHistory(justKeypressed); 
  D::process_input(justKeypressed,analogValue);
+ turbulenceCounter = 0;
     
  checkForSpell();	
 }
