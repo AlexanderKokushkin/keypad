@@ -75,12 +75,13 @@ template<class T,class D> bool Keypad_T<T,D>::init(){
 	analogRead(T::ttp_signal); // dirty hack
 	
 	// TODO organize constants properly
-    if (!Adxl345::init()){setAccelDoubleCheck(false); return false;}
-    Adxl345::setRangeSettings(2);
-    Adxl345::setTapDetectionOnXYZ(false,false,true);
-    Adxl345::setTapThreshold(7); // 2
-    Adxl345::setTapDuration(15);
-    Adxl345::setINT_ENABLE(false,true,false,false,false,false,false,false);	
+  if (!Adxl345::init()){setAccelDoubleCheck(false); return false;}
+
+  Adxl345::setRangeSettings(2);
+  Adxl345::setTapDetectionOnXYZ(false,false,true);
+  Adxl345::setTapThreshold(7); // 2
+  Adxl345::setTapDuration(15);
+  Adxl345::setINT_ENABLE(false,true,false,false,false,false,false,false);	
 	return(true);
 }
 
